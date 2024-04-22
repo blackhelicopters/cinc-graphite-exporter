@@ -32,6 +32,8 @@ func main() {
 		graphiteConnection.Disconnect()
 	}()
 
+	log.Println("CINC server exporter started.")
+
 	for {
 		select {
 		case <-time.After(time.Minute):
@@ -45,7 +47,19 @@ func main() {
 }
 
 func logAndSendServicesStatus(statusMap map[string]int, gr *graphite.Graphite) {
-	hostname := strings.Split(os.Getenv("HOSTNAME"), ".")[0]
+	f, err := os.Open("/etc/hostname")
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Scan()
+	hostname := strings.Split(scanner.Text(), ".")[0]
+
+	if err := scanner.Err(); err != nil {
+		log.Fatalln(err)
+	}
 
 	for service, status := range statusMap {
 		log.Println("sent metric:", fmt.Sprintf("vlg.cinc.serving.%s.%s", hostname, service), strconv.Itoa(status))
@@ -59,6 +73,7 @@ func initialize(ctx context.Context) (*pgxpool.Pool, *graphite.Graphite) {
 	if graphiteHost == "" {
 		log.Fatalf("GRAPHITE_HOST variable is empty.")
 	}
+
 	db, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
 	if err != nil {
 		log.Fatalf("Unable to connect to database: %v\n", err)
