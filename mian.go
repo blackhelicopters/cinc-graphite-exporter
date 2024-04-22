@@ -57,8 +57,7 @@ func initialize(ctx context.Context) (*pgxpool.Pool, *graphite.Graphite) {
 
 	graphiteHost := os.Getenv("GRAPHITE_HOST")
 	if graphiteHost == "" {
-		graphiteHost = "graphite.inf.videologygroup.com"
-		log.Println("Using the default GRAPHITE_HOST value:", graphiteHost)
+		log.Fatalf("GRAPHITE_HOST variable is empty.")
 	}
 	db, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
 	if err != nil {
