@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -31,26 +32,39 @@ func main() {
 		graphiteConnection.Disconnect()
 	}()
 
-	nodes, notInSyncNodes := loadNodes(ctx, db)
-	logAndSendNodes(nodes, notInSyncNodes, graphiteConnection)
+	for {
+		select {
+		case <-time.After(time.Minute):
+			nodes, notInSyncNodes := loadNodes(ctx, db)
+			logAndSendNodes(nodes, notInSyncNodes, graphiteConnection)
 
-	statusMap := scanServiceStatus()
-	logAndSendServicesStatus(statusMap, graphiteConnection)
+			statusMap := scanServiceStatus()
+			logAndSendServicesStatus(statusMap, graphiteConnection)
+		}
+	}
 }
 
 func logAndSendServicesStatus(statusMap map[string]int, gr *graphite.Graphite) {
+	hostname := strings.Split(os.Getenv("HOSTNAME"), ".")[0]
+
 	for service, status := range statusMap {
-		log.Println("sent metric:", fmt.Sprintf("cinc.serving.%s", service), strconv.Itoa(status))
-		gr.SimpleSend(fmt.Sprintf("cinc.serving.%s", service), strconv.Itoa(status))
+		log.Println("sent metric:", fmt.Sprintf("vlg.cinc.serving.%s.%s", hostname, service), strconv.Itoa(status))
+		gr.SimpleSend(fmt.Sprintf("vlg.cinc.serving.%s.%s", hostname, service), strconv.Itoa(status))
 	}
 }
 
 func initialize(ctx context.Context) (*pgxpool.Pool, *graphite.Graphite) {
+
+	graphiteHost := os.Getenv("GRAPHITE_HOST")
+	if graphiteHost == "" {
+		graphiteHost = "graphite.inf.videologygroup.com"
+		log.Println("Using the default GRAPHITE_HOST value:", graphiteHost)
+	}
 	db, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
 	if err != nil {
 		log.Fatalf("Unable to connect to database: %v\n", err)
 	}
-	gr, err := graphite.NewGraphiteWithMetricPrefix(os.Getenv("GRAPHITE_HOST"), 2003, os.Getenv("GRAPHITE_PREFIX"))
+	gr, err := graphite.NewGraphite(graphiteHost, 2003)
 	if err != nil {
 		log.Fatalf("Unable to connect to Graphite: %v\n", err)
 	}
@@ -73,15 +87,19 @@ func logAndSendNodes(nodes []*Node, notInSyncNodes []*Node, gr *graphite.Graphit
 	log.Printf("Not in sync node count: %d\n", len(notInSyncNodes))
 	for _, n := range notInSyncNodes {
 		log.Printf("Node %s was last updated more than 2 hours ago\n", n.Name)
-		gr.SimpleSend(fmt.Sprintf("cinc.notinsync.%s", n.Name), "1")
+		log.Printf("    vlg.cinc.notinsync.%s", n.Name)
+		gr.SimpleSend(fmt.Sprintf("vlg.cinc.notinsync.%s", n.Name), "1")
 	}
-	gr.SimpleSend("cinc.nodes.registered", strconv.Itoa(len(nodes)))
-	gr.SimpleSend("cinc.nodes.last_updated_2_hours_ago", strconv.Itoa(len(notInSyncNodes)))
-	log.Println("Metrics have been sent")
+	gr.SimpleSend("vlg.cinc.nodes.registered", strconv.Itoa(len(nodes)))
+	log.Println("    vlg.cinc.nodes.registered", strconv.Itoa(len(nodes)))
+	gr.SimpleSend("vlg.cinc.nodes.last_updated_2_hours_ago", strconv.Itoa(len(notInSyncNodes)))
+	log.Println("    vlg.cinc.nodes.last_updated_2_hours_ago", strconv.Itoa(len(notInSyncNodes)))
+	log.Println("Nodes metrics have been sent")
 }
 
 func scanServiceStatus() map[string]int {
 	statusMap := make(map[string]int)
+
 	cmd := exec.Command("sudo", "cinc-server-ctl", "status")
 	log.Println("sudo cinc-server-ctl status:")
 	stdout, err := cmd.StdoutPipe()
